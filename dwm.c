@@ -41,6 +41,7 @@
 #include <X11/extensions/Xinerama.h>
 #endif /* XINERAMA */
 #include <X11/Xft/Xft.h>
+#include <fribidi.h>
 #include <X11/Xlib-xcb.h>
 #include <xcb/res.h>
 
@@ -295,6 +296,7 @@ static char stext[256];
 static char rawstext[256];
 static int dwmblockssig;
 pid_t dwmblockspid = 0;
+static char fribidi_text[BUFSIZ] = "";
 static int screen;
 static int sw, sh;           /* X display screen geometry width, height */
 static int bh, blw = 0;      /* bar geometry */
@@ -336,6 +338,26 @@ static xcb_connection_t *xcon;
 struct NumTags { char limitexceeded[LENGTH(tags) > 31 ? -1 : 1]; };
 
 /* function implementations */
+static void
+apply_fribidi(char *str)
+{
+        FriBidiStrIndex len = strlen(str);
+        FriBidiChar logical[BUFSIZ];
+        FriBidiChar visual[BUFSIZ];
+        FriBidiParType base = FRIBIDI_PAR_ON;
+        FriBidiCharSet charset;
+        fribidi_boolean result;
+
+        fribidi_text[0] = 0;
+        if (len>0)
+        {
+                charset = fribidi_parse_charset("UTF-8");
+                len = fribidi_charset_to_unicode(charset, str, len, logical);
+                result = fribidi_log2vis(logical, len, &base, visual, NULL, NULL, NULL);
+                len = fribidi_unicode_to_charset(charset, visual, len, fribidi_text);
+        }
+}
+
 void
 applyrules(Client *c)
 {
@@ -872,8 +894,9 @@ drawbar(Monitor *m)
 	/* draw status first so it can be overdrawn by tags later */
 	if (m == selmon) { /* status is only drawn on selected monitor */
 		drw_setscheme(drw, scheme[SchemeNorm]);
-		tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
-		drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
+		apply_fribidi(stext);
+		tw = TEXTW(fribidi_text) - lrpad + 2; /* 2px right padding */
+		drw_text(drw, m->ww - tw, 0, tw, bh, 0, fribidi_text, 0);
 	}
 
 	for (c = m->clients; c; c = c->next) {
@@ -887,19 +910,22 @@ drawbar(Monitor *m)
 		if (!(occ & 1 << i || m->tagset[m->seltags] & 1 << i))
 		continue;
 
+		apply_fribidi(tags[i]);
 		w = TEXTW(tags[i]);
 		drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeSel : SchemeNorm]);
-		drw_text(drw, x, 0, w, bh, lrpad / 2, tags[i], urg & 1 << i);
+		drw_text(drw, x, 0, w, bh, lrpad / 2, fribidi_text, urg & 1 << i);
 		x += w;
 	}
-	w = blw = TEXTW(m->ltsymbol);
+	apply_fribidi(m->ltsymbol);
+	w = blw = TEXTW(fribidi_text);
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	x = drw_text(drw, x, 0, w, bh, lrpad / 2, m->ltsymbol, 0);
+	x = drw_text(drw, x, 0, w, bh, lrpad / 2, fribidi_text, 0);
 
 	if ((w = m->ww - tw - x) > bh) {
 		if (m->sel) {
 			drw_setscheme(drw, scheme[m == selmon ? SchemeSel : SchemeNorm]);
-			drw_text(drw, x, 0, w, bh, lrpad / 2, m->sel->name, 0);
+			apply_fribidi(m->sel->name);
+			drw_text(drw, x, 0, w, bh, lrpad / 2, fribidi_text, 0);
 			if (m->sel->isfloating)
 				drw_rect(drw, x + boxs, boxs, boxw, boxw, m->sel->isfixed, 0);
 		} else {
